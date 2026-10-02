@@ -1,0 +1,8 @@
+server/.venv/
+server/data/*.json
+client/node_modules/
+client/dist/
+*.tsbuildinfo
+__pycache__/
+*.py[cod]
+.env
