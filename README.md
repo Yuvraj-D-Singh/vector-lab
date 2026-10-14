@@ -43,17 +43,23 @@ Or use the one-command PowerShell helper from the project root: `./run-local.ps1
 
 `nomic-embed-text` uses Ollama's current `/api/embed` API; change model names in the Documents panel if you use another local model. HNSW and KD-tree gracefully fall back to exact search if their optional acceleration library is unavailable.
 
-## Deploy to Render
+## Deploy to Render for free
 
-The repository includes a Render Blueprint and Dockerfile for deploying the React UI and FastAPI API as one web service. The Blueprint provisions a 1 GB persistent disk for vectors and documents; Render requires a paid web-service plan for persistent disks.
+The repository includes a Render Blueprint and Dockerfile for deploying the React UI and FastAPI API together. The Blueprint uses Render's free web-service tier and does not provision a persistent disk, so this is suitable for a public demo rather than durable storage.
 
 1. Push this repository to GitHub.
-2. In Render, choose **New > Blueprint**, connect the repository, and deploy the `render.yaml` blueprint.
-3. Open the deployed service URL after the build and health check complete.
+2. In Render, choose **New > Blueprint**, connect the repository, and deploy the `render.yaml` blueprint. It selects the **Free** plan.
+3. Open the service URL after the build and health check complete.
 
-The Blueprint keeps the Ollama endpoint and credentials out of source control. If Render asks for those values during creation, start the local Ollama tunnel below first; otherwise add them in the service's **Environment** settings afterward.
+Free web services spin down after 15 minutes without traffic and can take about a minute to start again. Their filesystem is ephemeral: uploaded documents and vector changes can be lost when the service sleeps, restarts, or redeploys. Do not store important or sensitive data.
 
-The Docker build creates the client bundle and the server serves it alongside the API. Local files in `server/data` are excluded from the build; the deployment starts with the demo vectors and stores changes on the Render disk.
+The app has no user authentication. Anyone who can access the public service can modify its vectors and documents, so keep it demo-only unless you add access control.
+
+The Docker build creates the client bundle and the server serves it alongside the API. The deployment starts with the demo vectors; changes are stored only in the service's temporary filesystem.
+
+### Optional: connect Ollama for document retrieval
+
+Document embedding and RAG require an Ollama server reachable from Render. To use Ollama on your Windows PC, follow the protected local tunnel setup below, then add `OLLAMA_URL`, `OLLAMA_BASIC_AUTH_USERNAME`, and `OLLAMA_BASIC_AUTH_PASSWORD` in the Render service's **Environment** settings and redeploy. These settings are optional; the vector explorer works without them. Quick Tunnels are temporary, so the Ollama features stop working if the tunnel is unavailable.
 
 ### Connect Ollama running on your Windows PC
 
