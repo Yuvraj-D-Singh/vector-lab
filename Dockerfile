@@ -17,7 +17,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY server/requirements.txt ./server/requirements.txt
-RUN pip install --no-cache-dir -r server/requirements.txt
+RUN HNSWLIB_NO_NATIVE=1 pip install --no-cache-dir -r server/requirements.txt
 
 COPY server/app ./server/app
 COPY --from=client-build /app/client/dist ./client/dist

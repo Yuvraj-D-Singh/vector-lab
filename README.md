@@ -55,7 +55,7 @@ Free web services spin down after 15 minutes without traffic and can take about 
 
 The app has no user authentication. Anyone who can access the public service can modify its vectors and documents, so keep it demo-only unless you add access control.
 
-The Docker build creates the client bundle and the server serves it alongside the API. The deployment starts with the demo vectors; changes are stored only in the service's temporary filesystem.
+The Docker build creates the client bundle and the server serves it alongside the API. It builds hnswlib without CPU-specific compiler optimizations so the extension remains compatible with Render's runtime hardware. The deployment starts with the demo vectors; changes are stored only in the service's temporary filesystem.
 
 ### Optional: connect Ollama for document retrieval
 
