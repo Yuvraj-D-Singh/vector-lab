@@ -9,6 +9,7 @@ import uuid
 from collections import defaultdict
 from pathlib import Path
 from typing import AsyncIterator, Literal
+from urllib.parse import quote
 
 import httpx
 import numpy as np
@@ -34,8 +35,12 @@ DOCUMENT_FILE = DATA_DIR / "documents.json"
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 OLLAMA_BASIC_AUTH_USERNAME = os.getenv("OLLAMA_BASIC_AUTH_USERNAME", "")
 OLLAMA_BASIC_AUTH_PASSWORD = os.getenv("OLLAMA_BASIC_AUTH_PASSWORD", "")
+RAG_PROVIDER = os.getenv("RAG_PROVIDER", "ollama").lower()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 if bool(OLLAMA_BASIC_AUTH_USERNAME) != bool(OLLAMA_BASIC_AUTH_PASSWORD):
     raise RuntimeError("Set both OLLAMA_BASIC_AUTH_USERNAME and OLLAMA_BASIC_AUTH_PASSWORD, or leave both empty")
+if RAG_PROVIDER not in ("ollama", "gemini"):
+    raise RuntimeError("RAG_PROVIDER must be either 'ollama' or 'gemini'")
 OLLAMA_AUTH = (
     httpx.BasicAuth(OLLAMA_BASIC_AUTH_USERNAME, OLLAMA_BASIC_AUTH_PASSWORD)
     if OLLAMA_BASIC_AUTH_USERNAME
@@ -65,14 +70,14 @@ class BenchmarkIn(BaseModel):
 class DocumentIn(BaseModel):
     title: str = Field(min_length=1, max_length=140)
     text: str = Field(min_length=1, max_length=300_000)
-    embedding_model: str = "nomic-embed-text"
+    embedding_model: str = "gemini-embedding-001"
     chunk_size: int = Field(default=700, ge=150, le=2000)
     overlap: int = Field(default=100, ge=0, le=500)
 
 class AskIn(BaseModel):
     question: str = Field(min_length=1, max_length=5000)
-    embedding_model: str = "nomic-embed-text"
-    chat_model: str = "llama3.2:1b"
+    embedding_model: str = "gemini-embedding-001"
+    chat_model: str = "gemini-2.5-flash"
     k: int = Field(default=4, ge=1, le=10)
 
 def read_json(path: Path, default):
@@ -178,7 +183,41 @@ def chunk_text(text: str, size: int, overlap: int):
         cursor = end - overlap
     return [c for c in chunks if c]
 
-async def embed(inputs: list[str], model: str):
+async def embed(inputs: list[str], model: str, task_type: str):
+    if RAG_PROVIDER == "gemini":
+        if not GEMINI_API_KEY:
+            raise HTTPException(503, "Gemini is selected but GEMINI_API_KEY is not configured")
+        model_path = model if model.startswith("models/") else f"models/{model}"
+        endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{quote(model_path.removeprefix('models/'), safe='')}:batchEmbedContents"
+        requests = [
+            {
+                "model": model_path,
+                "content": {"parts": [{"text": text}]},
+                "taskType": task_type,
+                "outputDimensionality": 768,
+            }
+            for text in inputs
+        ]
+        embeddings = []
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                for offset in range(0, len(requests), 100):
+                    response = await client.post(
+                        endpoint,
+                        headers={"x-goog-api-key": GEMINI_API_KEY},
+                        json={"requests": requests[offset : offset + 100]},
+                    )
+                    response.raise_for_status()
+                    embeddings.extend(
+                        item["values"] for item in response.json()["embeddings"]
+                    )
+            return embeddings
+        except httpx.HTTPStatusError as error:
+            detail = error.response.text[:300]
+            raise HTTPException(503, f"Gemini embedding request failed. {detail or error}")
+        except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
+            raise HTTPException(503, f"Gemini embedding request failed: {error}")
+
     try:
         async with httpx.AsyncClient(timeout=120, auth=OLLAMA_AUTH) as client:
             response = await client.post(f"{OLLAMA_URL}/api/embed", json={"model": model, "input": inputs})
@@ -198,14 +237,24 @@ def health(): return {"status": "ok", "ollama_url": OLLAMA_URL}
 
 @app.get("/api/v1/status")
 async def model_status():
+    if RAG_PROVIDER == "gemini":
+        configured = bool(GEMINI_API_KEY)
+        return {
+            "provider": "gemini",
+            "available": configured,
+            "detail": None if configured else "Set GEMINI_API_KEY in the server environment",
+            "models": [],
+            "embedding_default": "gemini-embedding-001",
+            "chat_default": "gemini-2.5-flash",
+        }
     try:
         async with httpx.AsyncClient(timeout=8, auth=OLLAMA_AUTH) as client:
             response = await client.get(f"{OLLAMA_URL}/api/tags")
             response.raise_for_status()
         models = response.json().get("models", [])
-        return {"ollama": "online", "models": [{"name": m["name"], "capabilities": m.get("capabilities", [])} for m in models], "embedding_default": "nomic-embed-text", "chat_default": "llama3.2:1b"}
+        return {"provider": "ollama", "available": True, "ollama": "online", "models": [{"name": m["name"], "capabilities": m.get("capabilities", [])} for m in models], "embedding_default": "nomic-embed-text", "chat_default": "llama3.2:1b"}
     except httpx.HTTPError as error:
-        return {"ollama": "offline", "detail": str(error), "models": []}
+        return {"provider": "ollama", "available": False, "ollama": "offline", "detail": str(error), "models": [], "embedding_default": "nomic-embed-text", "chat_default": "llama3.2:1b"}
 
 @app.get("/api/v1/vectors")
 def get_vectors(): return {"vectors": vectors, "dimensions": len(vectors[0]["values"]) if vectors else 0}
@@ -261,7 +310,7 @@ def list_documents(): return {"documents": [{k: v for k, v in doc.items() if k n
 @app.post("/api/v1/documents", status_code=201)
 async def insert_document(body: DocumentIn):
     chunks = chunk_text(body.text, body.chunk_size, body.overlap)
-    embeddings = await embed(chunks, body.embedding_model)
+    embeddings = await embed(chunks, body.embedding_model, "RETRIEVAL_DOCUMENT")
     doc = {"id": uuid.uuid4().hex[:12], "title": body.title, "created_at": int(time.time()), "embedding_model": body.embedding_model, "chunks": chunks, "embeddings": embeddings}
     documents.append(doc); invalidate_document_index(); write_json(DOCUMENT_FILE, documents)
     return {"id": doc["id"], "title": doc["title"], "chunk_count": len(chunks)}
@@ -276,26 +325,57 @@ def delete_document(document_id: str):
 @app.post("/api/v1/documents/ask")
 async def ask(body: AskIn):
     if not documents: raise HTTPException(400, "Add a document before asking a question")
-    query = np.asarray((await embed([body.question], body.embedding_model))[0], dtype=np.float32)
+    query = np.asarray((await embed([body.question], body.embedding_model, "RETRIEVAL_QUERY"))[0], dtype=np.float32)
     top = search_document_index(query, body.k)
     contexts = [{"document_id": d["id"], "title": d["title"], "chunk": i + 1, "distance": round(s, 4), "text": d["chunks"][i]} for s, d, i in top]
     prompt = "Answer only from the supplied local sources. If the sources do not establish an answer, say so plainly. Cite sources as [Title, chunk N].\\n\\n" + "\\n\\n".join(f"[{c['title']}, chunk {c['chunk']}]\\n{c['text']}" for c in contexts) + f"\\n\\nQuestion: {body.question}\\nAnswer:"
     async def stream() -> AsyncIterator[str]:
         yield json.dumps({"type": "context", "items": contexts}) + "\n"
         try:
-            async with httpx.AsyncClient(timeout=180, auth=OLLAMA_AUTH) as client:
-                async with client.stream("POST", f"{OLLAMA_URL}/api/generate", json={"model": body.chat_model, "prompt": prompt, "stream": True, "options": {"temperature": 0.2}}) as r:
-                    r.raise_for_status()
-                    async for line in r.aiter_lines():
-                        if line:
-                            packet = json.loads(line)
-                            if packet.get("response"): yield json.dumps({"type": "token", "text": packet["response"]}) + "\n"
-                            if packet.get("done"): yield json.dumps({"type": "done"}) + "\n"
+            async with httpx.AsyncClient(timeout=180, auth=OLLAMA_AUTH if RAG_PROVIDER == "ollama" else None) as client:
+                if RAG_PROVIDER == "gemini":
+                    if not GEMINI_API_KEY:
+                        raise HTTPException(503, "Gemini is selected but GEMINI_API_KEY is not configured")
+                    model_path = body.chat_model.removeprefix("models/")
+                    async with client.stream(
+                        "POST",
+                        f"https://generativelanguage.googleapis.com/v1beta/models/{quote(model_path, safe='')}:streamGenerateContent",
+                        params={"alt": "sse"},
+                        headers={"x-goog-api-key": GEMINI_API_KEY},
+                        json={
+                            "systemInstruction": {
+                                "parts": [{"text": "Answer only from the supplied local sources. If the sources do not establish an answer, say so plainly. Cite sources as [Title, chunk N]."}]
+                            },
+                            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                            "generationConfig": {"temperature": 0.2},
+                        },
+                    ) as response:
+                        response.raise_for_status()
+                        async for line in response.aiter_lines():
+                            if line.startswith("data:"):
+                                packet = json.loads(line[5:].strip())
+                                for candidate in packet.get("candidates", []):
+                                    for part in candidate.get("content", {}).get("parts", []):
+                                        if part.get("text"):
+                                            yield json.dumps({"type": "token", "text": part["text"]}) + "\n"
+                    yield json.dumps({"type": "done"}) + "\n"
+                else:
+                    async with client.stream("POST", f"{OLLAMA_URL}/api/generate", json={"model": body.chat_model, "prompt": prompt, "stream": True, "options": {"temperature": 0.2}}) as response:
+                        response.raise_for_status()
+                        async for line in response.aiter_lines():
+                            if line:
+                                packet = json.loads(line)
+                                if packet.get("response"): yield json.dumps({"type": "token", "text": packet["response"]}) + "\n"
+                                if packet.get("done"): yield json.dumps({"type": "done"}) + "\n"
         except httpx.HTTPStatusError as error:
             detail = error.response.text[:300]
-            yield json.dumps({"type": "error", "message": f"Ollama could not generate with '{body.chat_model}'. {detail or error}"}) + "\n"
+            yield json.dumps({"type": "error", "message": f"{RAG_PROVIDER.title()} could not generate with '{body.chat_model}'. {detail or error}"}) + "\n"
         except httpx.HTTPError as error:
-            yield json.dumps({"type": "error", "message": f"Ollama generation failed: {error}"}) + "\n"
+            yield json.dumps({"type": "error", "message": f"{RAG_PROVIDER.title()} generation failed: {error}"}) + "\n"
+        except HTTPException as error:
+            yield json.dumps({"type": "error", "message": error.detail}) + "\n"
+        except (json.JSONDecodeError, KeyError, TypeError) as error:
+            yield json.dumps({"type": "error", "message": f"{RAG_PROVIDER.title()} returned an invalid response: {error}"}) + "\n"
     return StreamingResponse(stream(), media_type="application/x-ndjson")
 
 # When the React client is built, one Python process can serve both the API and UI.

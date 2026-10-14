@@ -131,9 +131,10 @@ function App() {
   const [title, setTitle] = useState(""),
     [text, setText] = useState(""),
     [docs, setDocs] = useState<any[]>([]),
-    [embedding, setEmbedding] = useState("nomic-embed-text"),
-    [chat, setChat] = useState("llama3.2:1b"),
+    [embedding, setEmbedding] = useState(""),
+    [chat, setChat] = useState(""),
     [modelStatus, setModelStatus] = useState<any>(),
+    [modelSettingsInitialized, setModelSettingsInitialized] = useState(false),
     [question, setQuestion] = useState(""),
     [answer, setAnswer] = useState(""),
     [contexts, setContexts] = useState<any[]>([]),
@@ -157,6 +158,11 @@ function App() {
       setStats(s);
       setDocs(d.documents);
       setModelStatus(status);
+      if (!modelSettingsInitialized) {
+        setEmbedding(status.embedding_default);
+        setChat(status.chat_default);
+        setModelSettingsInitialized(true);
+      }
       setError("");
     } catch (e: any) {
       setError(e.message);
@@ -494,33 +500,35 @@ function App() {
         <section className="shell documents">
           <div className="intro">
             <div>
-              <span className="eyebrow">LOCAL RETRIEVAL WORKSPACE</span>
+              <span className="eyebrow">DOCUMENT RETRIEVAL WORKSPACE</span>
               <h2>
                 Your documents,
                 <br />
-                kept on your machine.
+                ready to search.
               </h2>
               <p>
-                Paste source material, embed it using a local Ollama model, and
-                inspect exactly what is retrieved before an answer is written.
+                Paste source material, embed it with the configured provider,
+                and inspect what is retrieved before an answer is written.
               </p>
             </div>
             <div className="model-card">
               <label>
-                Embedding model
+                {modelStatus?.provider === "gemini" ? "Gemini embedding model" : "Ollama embedding model"}
                 <input
                   value={embedding}
                   onChange={(e) => setEmbedding(e.target.value)}
                 />
               </label>
               <label>
-                Chat model
+                {modelStatus?.provider === "gemini" ? "Gemini chat model" : "Ollama chat model"}
                 <input value={chat} onChange={(e) => setChat(e.target.value)} />
               </label>
-              <p className={modelStatus?.ollama === "online" ? "model-ready" : "model-error"}>
-                {modelStatus?.ollama === "online"
-                  ? `Ollama online · ${modelStatus.models.length} local models found`
-                  : "Ollama is unavailable — start it before embedding"}
+              <p className={modelStatus?.available ? "model-ready" : "model-error"}>
+                {modelStatus?.available
+                  ? modelStatus.provider === "gemini"
+                    ? "Gemini API key configured"
+                    : `Ollama online · ${modelStatus.models.length} local models found`
+                  : modelStatus?.detail || "AI provider is unavailable"}
               </p>
             </div>
           </div>
@@ -543,7 +551,7 @@ function App() {
                   required
                   value={text}
                   onChange={(e) => setText(e.target.value)}
-                  placeholder="Paste text here. It will be split into sensible overlapping passages before local embedding."
+                  placeholder="Paste text here. It will be split into overlapping passages before embedding."
                 />
               </label>
               <button className="primary" disabled={busy}>

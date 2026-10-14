@@ -9,7 +9,7 @@ Local vector search and retrieval lab: a FastAPI service with a React browser in
 - Cosine, Euclidean, and Manhattan metrics
 - Brute-force exact search, KD-tree (SciPy when installed), and HNSW (hnswlib when installed)
 - Timed benchmark endpoint and index statistics
-- Local document chunking, Ollama embeddings, vector retrieval, and streamed RAG answers
+- Document chunking, Ollama or Gemini embeddings, vector retrieval, and streamed RAG answers
 - JSON-on-disk persistence with no cloud services or database required
 
 ## Quick start on Windows
@@ -57,13 +57,15 @@ The app has no user authentication. Anyone who can access the public service can
 
 The Docker build creates the client bundle and the server serves it alongside the API. It builds hnswlib without CPU-specific compiler optimizations so the extension remains compatible with Render's runtime hardware. The deployment starts with the demo vectors; changes are stored only in the service's temporary filesystem.
 
-### Optional: connect Ollama for document retrieval
+### Enable Gemini document retrieval
 
-Document embedding and RAG require an Ollama server reachable from Render. To use Ollama on your Windows PC, follow the protected local tunnel setup below, then add `OLLAMA_URL`, `OLLAMA_BASIC_AUTH_USERNAME`, and `OLLAMA_BASIC_AUTH_PASSWORD` in the Render service's **Environment** settings and redeploy. These settings are optional; the vector explorer works without them. Quick Tunnels are temporary, so the Ollama features stop working if the tunnel is unavailable.
+The Render Blueprint selects Gemini for document embeddings and streamed answers. Create an API key in [Google AI Studio](https://aistudio.google.com/app/apikey), then add it as `GEMINI_API_KEY` in the Render service's **Environment** settings. Save the value and redeploy. Keep the key private and do not put it in source control. Gemini's free-tier quotas and available models can change; requests are subject to Google's [Gemini API terms](https://ai.google.dev/gemini-api/terms), including free-tier data-use terms. Do not upload sensitive documents.
+
+The UI defaults to `gemini-embedding-001` and `gemini-2.5-flash`. The API key is only used server-side. To use Ollama instead, set `RAG_PROVIDER=ollama`; local development defaults to Ollama and uses the local models below.
 
 ### Connect Ollama running on your Windows PC
 
-Ollama itself is free, but it runs on your PC in this setup. Document embedding and RAG are available only while your PC is on, Ollama is running, and the tunnel is connected. The included Caddy configuration protects the Ollama endpoint with Basic Auth; do not expose Ollama's port 11434 directly to the internet.
+Ollama itself is free, but it runs on your PC in this setup. If you set `RAG_PROVIDER=ollama` on a remote deployment, document embedding and RAG are available only while your PC is on, Ollama is running, and the tunnel is connected. The included Caddy configuration protects the Ollama endpoint with Basic Auth; do not expose Ollama's port 11434 directly to the internet.
 
 1. Install and start [Ollama for Windows](https://ollama.com/download/windows), [Caddy](https://caddyserver.com/download), and [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/). In a PowerShell window, download the two models:
 
@@ -92,7 +94,7 @@ Ollama itself is free, but it runs on your PC in this setup. Document embedding 
    Keep this window open too. Copy the `https://....trycloudflare.com` URL it prints.
 
 4. In Render, open the `vector-atlas` service's **Environment** settings and set `OLLAMA_URL` to that HTTPS URL, `OLLAMA_BASIC_AUTH_USERNAME` to the username from step 2, and `OLLAMA_BASIC_AUTH_PASSWORD` to the password from step 2. Save changes and let Render redeploy.
-5. In Vector Atlas, the Documents workspace should now show the Ollama models. If the Quick Tunnel is stopped or restarted, repeat step 3 and update `OLLAMA_URL` if its URL changed.
+5. In Render, set `RAG_PROVIDER=ollama`, `OLLAMA_URL` to the tunnel URL, `OLLAMA_BASIC_AUTH_USERNAME` to the username from step 2, and `OLLAMA_BASIC_AUTH_PASSWORD` to the password from step 2. Remove or leave `GEMINI_API_KEY` unset, then save and redeploy. If the Quick Tunnel is stopped or restarted, repeat step 3 and update `OLLAMA_URL` if its URL changed.
 
 Cloudflare Quick Tunnels are temporary and intended for development/testing, not a guaranteed always-on production connection. This application itself does not require user authentication, so anyone who can reach the public service can modify its vectors and documents. Keep it demo-only unless you add access control, and do not upload sensitive documents.
 
@@ -117,10 +119,10 @@ Cloudflare Quick Tunnels are temporary and intended for development/testing, not
 React + Vite  ── JSON / streaming NDJSON ──>  FastAPI + NumPy
                                                ├─ Brute force / KD-tree / HNSW
                                                ├─ local JSON persistence
-                                               └─ Ollama `/api/embed` + `/api/generate`
+                                               └─ Ollama or Gemini embedding + generation APIs
 ```
 
-The service never uploads content; Ollama is contacted only at its configurable local address (default `http://127.0.0.1:11434`).
+With Ollama, content is sent only to the configured Ollama endpoint (default `http://127.0.0.1:11434`). With Gemini, document chunks and questions are sent to Google's Gemini API using the server-side API key.
 
 ## Using the vector explorer
 
