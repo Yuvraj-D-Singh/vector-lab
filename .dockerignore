@@ -1,0 +1,6 @@
+.git
+**/__pycache__
+**/.venv
+**/node_modules
+client/dist
+server/data

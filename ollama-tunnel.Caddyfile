@@ -1,0 +1,7 @@
+127.0.0.1:11435 {
+    basic_auth {
+        {$OLLAMA_TUNNEL_USER} {$OLLAMA_TUNNEL_PASSWORD_HASH}
+    }
+
+    reverse_proxy 127.0.0.1:11434
+}

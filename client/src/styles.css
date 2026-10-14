@@ -228,40 +228,37 @@ select,
   padding: 25px 28px 12px;
   min-width: 0;
 }
-.three-map {
+.scatter-plot {
   height: 400px;
-  position: relative;
   margin-top: 10px;
   border: 1px solid #e1e2db;
   background: #f8f8f4;
 }
-.three-map canvas {
-  display: block;
-  touch-action: none;
-}
-.axis-label {
-  position: absolute;
-  font: 10px "DM Mono";
-  color: #73796f;
-  pointer-events: none;
-}
-.point-inspector {
-  position: absolute;
-  left: 15px;
-  top: 15px;
+.chart-tooltip {
   display: grid;
-  gap: 3px;
-  padding: 9px 10px;
-  background: rgba(250, 250, 246, .94);
-  border-left: 2px solid #687a61;
-  pointer-events: none;
-  font-size: 11px;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid #d8d9d1;
+  background: #fff;
+  box-shadow: 0 4px 14px #24262018;
+  font-size: 12px;
 }
-.point-inspector b { font-size: 12px; }
-.point-inspector span, .point-inspector code { font: 10px "DM Mono"; color: #697067; }
-.axis-x { right: 19px; bottom: 16px; }
-.axis-y { left: 18px; bottom: 16px; }
-.axis-z { left: 18px; top: 16px; }
+.chart-tooltip span,
+.chart-tooltip code {
+  color: #6d7268;
+  font: 10px "DM Mono";
+}
+.additional-coordinates {
+  margin-top: 15px;
+  border-top: 1px solid #e1e2db;
+  padding-top: 12px;
+  font-size: 12px;
+}
+.additional-coordinates summary {
+  cursor: pointer;
+  color: #596752;
+  font-weight: 600;
+}
 .map-actions {
   display: flex;
   justify-content: space-between;
@@ -271,15 +268,6 @@ select,
   color: #787c74;
   font: 11px "DM Mono";
 }
-.map-reset {
-  border: 1px solid #d4d6ce;
-  border-radius: 3px;
-  background: #fafaf6;
-  color: #4e584b;
-  padding: 6px 9px;
-  font: 11px "DM Mono";
-}
-.map-reset:hover { background: #edf0e9; }
 .panel-title,
 .section-head,
 .result-top {

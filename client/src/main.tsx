@@ -1,7 +1,15 @@
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Canvas } from "@react-three/fiber";
-import { OrbitControls } from "@react-three/drei";
+import {
+  CartesianGrid,
+  Legend,
+  ResponsiveContainer,
+  Scatter,
+  ScatterChart,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import "./styles.css";
 
 const api = async (path: string, init?: RequestInit) => {
@@ -29,84 +37,83 @@ const colors: Record<string, string> = {
   Custom: "#ae5e71",
 };
 
-function VectorPoint({ vector, onSelect }: { vector: Vector; onSelect: (point: Vector) => void }) {
-  const [x, y, z = 0] = vector.values;
-  return (
-    <mesh position={[x, z, y]} onClick={(event) => { event.stopPropagation(); onSelect(vector) }}>
-      <sphereGeometry args={[0.115, 22, 22]} />
-      <meshStandardMaterial
-        color={colors[vector.group] || colors.Custom}
-        roughness={0.42}
-      />
-    </mesh>
-  );
-}
-
-function ThreeDimensionalMap({
+function VectorScatterPlot({
   vectors,
   query,
-  viewKey,
   onChooseQuery,
 }: {
   vectors: Vector[];
   query: number[];
-  viewKey: number;
   onChooseQuery: (point: Vector) => void;
 }) {
-  const [active, setActive] = useState<Vector | null>(null);
+  const groups = Array.from(new Set(vectors.map((vector) => vector.group)));
   return (
-    <div
-      className="three-map"
-      aria-label="Three-dimensional vector collection. Drag to orbit, use the wheel to zoom, and right-drag to pan."
-    >
-      <Canvas
-        key={viewKey}
-        camera={{ position: [6.8, 5.5, 8.2], fov: 42 }}
-        dpr={[1, 2]}
-        onPointerMissed={() => setActive(null)}
-      >
-        <color attach="background" args={["#f8f8f4"]} />
-        <ambientLight intensity={1.25} />
-        <directionalLight position={[5, 7, 5]} intensity={2.1} />
-        <gridHelper
-          args={[9, 18, "#d6d8cf", "#e7e8e1"]}
-          rotation={[Math.PI / 2, 0, 0]}
-        />
-        <axesHelper args={[2.6]} />
-        {vectors.map((vector) => (
-          <VectorPoint
-            key={vector.id}
-            vector={vector}
-            onSelect={(point) => {
-              setActive(point);
-              onChooseQuery(point);
+    <div className="scatter-plot" aria-label="2D scatter plot of vector clusters">
+      <ResponsiveContainer width="100%" height="100%">
+        <ScatterChart margin={{ top: 12, right: 24, bottom: 14, left: 8 }}>
+          <CartesianGrid stroke="#e1e2db" strokeDasharray="3 4" />
+          <XAxis
+            type="number"
+            dataKey="x"
+            name="X"
+            tick={{ fill: "#777b73", fontSize: 11 }}
+            axisLine={{ stroke: "#bfc2b8" }}
+            tickLine={false}
+          />
+          <YAxis
+            type="number"
+            dataKey="y"
+            name="Y"
+            tick={{ fill: "#777b73", fontSize: 11 }}
+            axisLine={{ stroke: "#bfc2b8" }}
+            tickLine={false}
+          />
+          <Tooltip
+            cursor={{ stroke: "#a5a99f", strokeDasharray: "4 4" }}
+            content={({ active, payload }) => {
+              const point = payload?.[0]?.payload;
+              if (!active || !point) return null;
+              const vector = point.vector as Vector | undefined;
+              return (
+                <div className="chart-tooltip">
+                  <strong>{vector?.label || "Search point"}</strong>
+                  {vector && <span>{vector.group} · click to search</span>}
+                  <code>
+                    x {point.x.toFixed(2)} · y {point.y.toFixed(2)}
+                  </code>
+                </div>
+              );
             }}
           />
-        ))}
-        <mesh
-          position={[query[0], query[2] ?? 0, query[1]]}
-          rotation={[0, Math.PI / 4, 0]}
-        >
-          <octahedronGeometry args={[0.22, 0]} />
-          <meshStandardMaterial
-            color="#252821"
-            emissive="#252821"
-            emissiveIntensity={0.15}
+          <Legend verticalAlign="top" align="right" height={34} />
+          {groups.map((group) => (
+            <Scatter
+              key={group}
+              name={group}
+              data={vectors
+                .filter((vector) => vector.group === group)
+                .map((vector) => ({
+                  x: vector.values[0],
+                  y: vector.values[1],
+                  vector,
+                }))}
+              fill={colors[group] || colors.Custom}
+              onClick={(entry) => {
+                const point = (entry as any)?.payload?.vector;
+                if (point) onChooseQuery(point);
+              }}
+              cursor="pointer"
+            />
+          ))}
+          <Scatter
+            name="Search point"
+            data={[{ x: query[0] ?? 0, y: query[1] ?? 0 }]}
+            shape="diamond"
+            fill="#252821"
+            isAnimationActive={false}
           />
-        </mesh>
-        <OrbitControls
-          makeDefault
-          enableDamping
-          dampingFactor={0.08}
-          minDistance={3.5}
-          maxDistance={18}
-          target={[0, 0, 0]}
-        />
-      </Canvas>
-      {active && <div className="point-inspector"><b>{active.label}</b><span>{active.group}</span><code>[{active.values.map(value => value.toFixed(2)).join(', ')}]</code></div>}
-      <div className="axis-label axis-x">X</div>
-      <div className="axis-label axis-y">Y depth</div>
-      <div className="axis-label axis-z">Z elevation</div>
+        </ScatterChart>
+      </ResponsiveContainer>
     </div>
   );
 }
@@ -115,13 +122,12 @@ function App() {
   const [tab, setTab] = useState<"explorer" | "documents">("explorer"),
     [vectors, setVectors] = useState<Vector[]>([]),
     [stats, setStats] = useState<any>(),
-    [query, setQuery] = useState([0, 0, 0]),
+    [query, setQuery] = useState([0, 0]),
     [metric, setMetric] = useState("cosine"),
     [k, setK] = useState(5),
     [search, setSearch] = useState<any>(),
     [benchmark, setBenchmark] = useState<any>(),
-    [error, setError] = useState(""),
-    [viewKey, setViewKey] = useState(0);
+    [error, setError] = useState("");
   const [title, setTitle] = useState(""),
     [text, setText] = useState(""),
     [docs, setDocs] = useState<any[]>([]),
@@ -141,6 +147,13 @@ function App() {
         api("/status"),
       ]);
       setVectors(v.vectors);
+      setQuery((current) => {
+        const dimensions = Math.max(2, v.dimensions);
+        return Array.from(
+          { length: dimensions },
+          (_, index) => current[index] ?? 0,
+        );
+      });
       setStats(s);
       setDocs(d.documents);
       setModelStatus(status);
@@ -325,39 +338,49 @@ function App() {
                 Adjust coordinates and compare identical queries through three
                 retrieval strategies.
               </p>
-              <label>
-                X coordinate
-                <input
-                  type="number"
-                  step=".1"
-                  value={query[0]}
-                  onChange={(e) =>
-                    setQuery([+e.target.value, query[1], query[2]])
-                  }
-                />
-              </label>
-              <label>
-                Y coordinate
-                <input
-                  type="number"
-                  step=".1"
-                  value={query[1]}
-                  onChange={(e) =>
-                    setQuery([query[0], +e.target.value, query[2]])
-                  }
-                />
-              </label>
-              <label>
-                Z coordinate
-                <input
-                  type="number"
-                  step=".1"
-                  value={query[2]}
-                  onChange={(e) =>
-                    setQuery([query[0], query[1], +e.target.value])
-                  }
-                />
-              </label>
+              {query.slice(0, 2).map((coordinate, index) => (
+                <label key={index}>
+                  {index === 0 ? "X" : "Y"} coordinate
+                  <input
+                    type="number"
+                    step=".1"
+                    value={coordinate}
+                    onChange={(event) =>
+                      setQuery((current) =>
+                        current.map((value, coordinateIndex) =>
+                          coordinateIndex === index
+                            ? +event.target.value
+                            : value,
+                        ),
+                      )
+                    }
+                  />
+                </label>
+              ))}
+              {query.length > 2 && (
+                <details className="additional-coordinates">
+                  <summary>Additional dimensions ({query.length - 2})</summary>
+                  {query.slice(2).map((coordinate, index) => (
+                    <label key={index + 2}>
+                      Dimension {index + 3}
+                      <input
+                        type="number"
+                        step=".1"
+                        value={coordinate}
+                        onChange={(event) =>
+                          setQuery((current) =>
+                            current.map((value, coordinateIndex) =>
+                              coordinateIndex === index + 2
+                                ? +event.target.value
+                                : value,
+                            ),
+                          )
+                        }
+                      />
+                    </label>
+                  ))}
+                </details>
+              )}
               <label>
                 Distance
                 <select
@@ -394,24 +417,20 @@ function App() {
                 </div>
                 <span className="query-key">● query [{query.join(", ")}]</span>
               </div>
-              <ThreeDimensionalMap
+              <VectorScatterPlot
                 vectors={vectors}
                 query={query}
-                viewKey={viewKey}
                 onChooseQuery={(point) => {
                   setQuery(point.values);
                   runSearch(point.values);
                 }}
               />
               <div className="map-actions">
-                <span>Drag to orbit · wheel to zoom · right-drag to pan</span>
-                <button className="map-reset" onClick={() => setViewKey((key) => key + 1)}>
-                  Reset view
-                </button>
+                <span>Hover a point to inspect it · select a point to search</span>
               </div>
               <p className="caption">
-                The collection is plotted in X, Y, and Z space. The dark diamond
-                is the active query point.
+                Color identifies each cluster. The dark diamond marks the query;
+                higher dimensions remain part of the search when present.
               </p>
             </div>
           </div>

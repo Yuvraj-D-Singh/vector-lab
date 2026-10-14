@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: vector-atlas
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/v1/health
+    disk:
+      name: vector-atlas-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: VECTOR_ATLAS_DATA
+        value: /var/data
+      - key: OLLAMA_URL
+        sync: false
+      - key: OLLAMA_BASIC_AUTH_USERNAME
+        sync: false
+      - key: OLLAMA_BASIC_AUTH_PASSWORD
+        sync: false

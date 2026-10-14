@@ -32,6 +32,15 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 VECTOR_FILE = DATA_DIR / "vectors.json"
 DOCUMENT_FILE = DATA_DIR / "documents.json"
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
+OLLAMA_BASIC_AUTH_USERNAME = os.getenv("OLLAMA_BASIC_AUTH_USERNAME", "")
+OLLAMA_BASIC_AUTH_PASSWORD = os.getenv("OLLAMA_BASIC_AUTH_PASSWORD", "")
+if bool(OLLAMA_BASIC_AUTH_USERNAME) != bool(OLLAMA_BASIC_AUTH_PASSWORD):
+    raise RuntimeError("Set both OLLAMA_BASIC_AUTH_USERNAME and OLLAMA_BASIC_AUTH_PASSWORD, or leave both empty")
+OLLAMA_AUTH = (
+    httpx.BasicAuth(OLLAMA_BASIC_AUTH_USERNAME, OLLAMA_BASIC_AUTH_PASSWORD)
+    if OLLAMA_BASIC_AUTH_USERNAME
+    else None
+)
 
 Metric = Literal["cosine", "euclidean", "manhattan"]
 Algorithm = Literal["brute_force", "kd_tree", "hnsw"]
@@ -82,15 +91,13 @@ def seed_vectors():
     for cx, cy, group in centers:
         for i in range(12):
             x, y = rng.normal((cx, cy), 0.48)
-            z = rng.normal(0.35 if group == "Indigo" else (-0.5 if group == "Sage" else 0.1), 0.42)
-            rows.append({"id": f"{group.lower()}-{i+1}", "label": f"{group} {i+1}", "values": [round(float(x), 4), round(float(y), 4), round(float(z), 4)], "group": group})
+            rows.append({"id": f"{group.lower()}-{i+1}", "label": f"{group} {i+1}", "values": [round(float(x), 4), round(float(y), 4)], "group": group})
     return rows
 
 vectors: list[dict] = read_json(VECTOR_FILE, seed_vectors())
-# Keep collections created by the earlier 2D demo usable in the 3D explorer.
-if vectors and len(vectors[0]["values"]) == 2:
-    for vector in vectors:
-        vector["values"].append(0.0)
+# Reduce the prior planar demo collection to its actual X/Y dimensions.
+if vectors and all(len(vector["values"]) == 3 and vector["values"][2] == 0 for vector in vectors):
+    vectors = [{**vector, "values": vector["values"][:2]} for vector in vectors]
 write_json(VECTOR_FILE, vectors)
 documents: list[dict] = read_json(DOCUMENT_FILE, [])
 document_hnsw = None
@@ -173,7 +180,7 @@ def chunk_text(text: str, size: int, overlap: int):
 
 async def embed(inputs: list[str], model: str):
     try:
-        async with httpx.AsyncClient(timeout=120) as client:
+        async with httpx.AsyncClient(timeout=120, auth=OLLAMA_AUTH) as client:
             response = await client.post(f"{OLLAMA_URL}/api/embed", json={"model": model, "input": inputs})
             response.raise_for_status()
             return response.json()["embeddings"]
@@ -192,7 +199,7 @@ def health(): return {"status": "ok", "ollama_url": OLLAMA_URL}
 @app.get("/api/v1/status")
 async def model_status():
     try:
-        async with httpx.AsyncClient(timeout=8) as client:
+        async with httpx.AsyncClient(timeout=8, auth=OLLAMA_AUTH) as client:
             response = await client.get(f"{OLLAMA_URL}/api/tags")
             response.raise_for_status()
         models = response.json().get("models", [])
@@ -276,7 +283,7 @@ async def ask(body: AskIn):
     async def stream() -> AsyncIterator[str]:
         yield json.dumps({"type": "context", "items": contexts}) + "\n"
         try:
-            async with httpx.AsyncClient(timeout=180) as client:
+            async with httpx.AsyncClient(timeout=180, auth=OLLAMA_AUTH) as client:
                 async with client.stream("POST", f"{OLLAMA_URL}/api/generate", json={"model": body.chat_model, "prompt": prompt, "stream": True, "options": {"temperature": 0.2}}) as r:
                     r.raise_for_status()
                     async for line in r.aiter_lines():
